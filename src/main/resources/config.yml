@@ -1,0 +1,19 @@
+messages:
+  start: "&cСтример &f{player} &cначал стрим: &9&n{link}{desc}"
+  desc: " &7({desc})"
+  stop: "&aСтрим завершён!"
+  no_permission: "&cУ вас нет прав на использование этой команды!"
+  not_streaming: "&eВы не находитесь в эфире."
+  need_link: "&eУкажите ссылку на твич: /стрим <ссылка>"
+  usage: "&eИспользуйте: /стрим <ссылка> или /стрим стоп"
+  only_player: "&cТолько игрок может использовать эту команду!"
+  invalid_link: "&cВведите корректную ссылку на Twitch!"
+
+twitch:
+  # группа, которая выдается стримеру, когда он на стриме
+  group: "twitch_on"
+  # ID клиента Twitch
+  client_id: "Клиент ID"
+  # Токен OAuth
+  oauth_token: "Токен"
+  streamers: []
