@@ -17,7 +17,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
 
     private String clientId;
     private String oauthToken;
-    private String twitchGroup = "twitch_on"; // Группа для выдачи
+    private String twitchGroup = "Группа"; // Группа для выдачи
     private java.util.List<StreamerInfo> streamers = new java.util.ArrayList<>();
 
     public java.util.List<StreamerInfo> getStreamers() {
@@ -104,7 +104,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
     public void reloadPlugin() {
         this.clientId = config.getString("twitch.client_id");
         this.oauthToken = config.getString("twitch.oauth_token");
-        this.twitchGroup = config.getString("twitch.group", "twitch_on"); // Группа для выдачи
+        this.twitchGroup = config.getString("twitch.group", "Группа"); // Группа для выдачи
         loadStreamersFromConfig();
         if (twitchCommand != null) {
             HandlerList.unregisterAll(twitchCommand);
