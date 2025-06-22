@@ -11,7 +11,7 @@ messages:
 
 twitch:
   # группа, которая выдается стримеру, когда он на стриме
-  group: "twitch_on"
+  group: "Группа"
   # ID клиента Twitch
   client_id: "Клиент ID"
   # Токен OAuth
