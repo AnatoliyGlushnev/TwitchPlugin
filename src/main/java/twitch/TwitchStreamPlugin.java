@@ -12,6 +12,7 @@ import net.luckperms.api.node.NodeType;
 import twitch.model.StreamerInfo;
 import twitch.service.StreamerManager;
 import twitch.service.TwitchApiService;
+import twitch.service.TwitchAnnounceTask;
 import twitch.command.TwitchCommand;
 
 public class TwitchStreamPlugin extends JavaPlugin {
@@ -20,9 +21,10 @@ public class TwitchStreamPlugin extends JavaPlugin {
     private LuckPerms luckPerms;
     private String clientId;
     private String oauthToken;
-    private String twitchGroup = "twitch_on"; // Группа для выдачи
+    private String twitchGroup; 
     private TwitchApiService twitchApiService;
     private StreamerManager streamerManager;
+    private io.papermc.paper.threadedregions.scheduler.ScheduledTask announceTask = null;
 
     public String getTwitchGroup() {
         return twitchGroup;
@@ -38,9 +40,12 @@ public class TwitchStreamPlugin extends JavaPlugin {
         this.luckPerms = getServer().getServicesManager().load(LuckPerms.class);
         this.twitchApiService = new TwitchApiService(clientId, oauthToken, getLogger());
         this.twitchApiService.validateConnection();
+        this.twitchGroup = config.getString("group", "twitch_on"); // по умолчанию
         if (this.luckPerms == null) {
             getLogger().severe("LuckPerms не найден! Плагин не сможет выдавать группы.");
         }
+        // анонс стримеров
+        startAnnounceTask();
         reloadPlugin();
         getLogger().info("[TWITCH PLUGIN ANNONCE] TwitchStreamPlugin работает.");
     }
@@ -59,7 +64,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
     public void reloadPlugin() {
         this.clientId = config.getString("twitch.client_id");
         this.oauthToken = config.getString("twitch.oauth_token");
-        this.twitchGroup = config.getString("twitch.group", "twitch_on"); // Группа для выдачи
+        this.twitchGroup = config.getString("twitch.group", "twitch_on"); // Группа для выдачи, ПО УМОЛЧАНИЮ twitch_on
         this.streamerManager = new StreamerManager(config);
         if (twitchCommand != null) {
             HandlerList.unregisterAll(twitchCommand);
@@ -67,8 +72,23 @@ public class TwitchStreamPlugin extends JavaPlugin {
         twitchCommand = new TwitchCommand(this, streamerManager);
         getCommand("стрим").setExecutor(twitchCommand);
         startStreamChecker();
+        startAnnounceTask();
     }
+    private void startAnnounceTask() {
+        long announcePeriod = config.getLong("twitch.announce_period", 72000L);
+        if (announceTask != null) {
+            announceTask.cancel();
+        }
+        announceTask = getServer().getGlobalRegionScheduler().runAtFixedRate(
+            this,
+            task -> new TwitchAnnounceTask(this, streamerManager).run(),
+            announcePeriod, // initial delay
+            announcePeriod  // period
+        );
+    }
+
     private void startStreamChecker() {
+        long checkPeriod = config.getLong("twitch.stream_check_period", 1200L);
         getServer().getGlobalRegionScheduler().runAtFixedRate(
             this,
             task -> {
@@ -77,7 +97,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
                 }
             },
             1L,
-            1200L // (60 секунд)
+            checkPeriod
         );
     }
 
@@ -98,9 +118,8 @@ public class TwitchStreamPlugin extends JavaPlugin {
             link.setColor(net.md_5.bungee.api.ChatColor.BLUE);
             link.setUnderlined(true);
             link.setClickEvent(new net.md_5.bungee.api.chat.ClickEvent(net.md_5.bungee.api.chat.ClickEvent.Action.OPEN_URL, streamer.url));
-            msg.addExtra(link);
             for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
-                p.spigot().sendMessage(msg);
+                p.sendMessage(msg.getText());
             }
             // префикс через LuckPerms
             LuckPerms luckPerms = getLuckPerms();

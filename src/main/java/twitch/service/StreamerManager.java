@@ -25,7 +25,7 @@ public class StreamerManager {
                 String twitch = (String) map.get("twitch");
                 String url = (String) map.get("url");
                 if (mc != null && twitch != null && url != null) {
-                    streamers.add(new StreamerInfo(mc, twitch, url));
+                    streamers.add(new StreamerInfo(mc, twitch, url, ""));
                 }
             }
         }
@@ -39,21 +39,17 @@ public class StreamerManager {
         return streamerLiveStatus;
     }
 
-    public void addStreamer(String mcName, String twitchName, String url) {
-        streamers.add(new StreamerInfo(mcName, twitchName, url));
-        List<Map<String, Object>> rawList = new ArrayList<>();
-        for (StreamerInfo s : streamers) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("mc", s.mcName);
-            map.put("twitch", s.twitchName);
-            map.put("url", s.url);
-            rawList.add(map);
-        }
-        config.set("twitch.streamers", rawList);
+    public void addStreamer(String mcName, String twitchName, String url, String desc) {
+        streamers.add(new StreamerInfo(mcName, twitchName, url, desc));
+        saveStreamersToConfig();
     }
 
     public void removeStreamer(String name) {
         streamers.removeIf(s -> name.equalsIgnoreCase(s.mcName) || name.equalsIgnoreCase(s.twitchName));
+        saveStreamersToConfig();
+    }
+
+    private void saveStreamersToConfig() {
         List<Map<String, Object>> rawList = new ArrayList<>();
         for (StreamerInfo s : streamers) {
             Map<String, Object> map = new HashMap<>();
@@ -63,5 +59,12 @@ public class StreamerManager {
             rawList.add(map);
         }
         config.set("twitch.streamers", rawList);
+        if (config instanceof org.bukkit.configuration.file.FileConfiguration) {
+            try {
+                ((org.bukkit.configuration.file.FileConfiguration) config).save("plugins/TwitchStream/config.yml");
+            } catch (java.io.IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
 }

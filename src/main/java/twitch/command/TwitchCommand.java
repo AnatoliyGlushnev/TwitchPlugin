@@ -38,6 +38,41 @@ public class TwitchCommand implements CommandExecutor, Listener {
             return true;
         }
         Player player = (Player) sender;
+        // /стрим стоп
+        if (args.length == 1 && args[0].equalsIgnoreCase("стоп")) {
+            LuckPerms luckPerms = plugin.getLuckPerms();
+            if (luckPerms != null) {
+                luckPerms.getUserManager().loadUser(player.getUniqueId()).thenAcceptAsync(user -> {
+                    user.data().clear(node -> node instanceof InheritanceNode &&
+                            ((InheritanceNode) node).getGroupName().equalsIgnoreCase(plugin.getTwitchGroup()));
+                    luckPerms.getUserManager().saveUser(user);
+                });
+            }
+            // Можно также удалить из списка стримеров, если требуется:
+            streamerManager.removeStreamer(player.getName());
+            player.sendMessage("§aВы остановили стрим. Группа снята.");
+            return true;
+        }
+        // /стрим <ссылка> <описание>
+        if (args.length >= 1 && (args[0].startsWith("https://www.twitch.tv/") || args[0].startsWith("https://twitch.tv/"))) {
+            String url = args[0];
+            String desc = args.length > 1 ? String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length)) : "";
+            String mcName = player.getName();
+            String twitchName = url.replace("https://www.twitch.tv/", "").replace("https://twitch.tv/", "").replaceAll("/", "");
+            LuckPerms luckPerms = plugin.getLuckPerms();
+            if (luckPerms != null) {
+                luckPerms.getUserManager().loadUser(player.getUniqueId()).thenAcceptAsync(user -> {
+                    user.data().add(InheritanceNode.builder(plugin.getTwitchGroup()).build());
+                    luckPerms.getUserManager().saveUser(user);
+                });
+            }
+
+            String msg = plugin.getMessage("stream_manual_broadcast", mcName, url, desc);
+            for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                p.sendMessage(msg);
+            }
+            return true;
+        }
         if (args.length == 1 && !args[0].equalsIgnoreCase("стоп") && !args[0].equalsIgnoreCase("список") && !args[0].equalsIgnoreCase("reload") && !args[0].equalsIgnoreCase("статус") && !args[0].equalsIgnoreCase("добавить") && !args[0].equalsIgnoreCase("удалить")) {
             // /стрим <ник> — показать ссылку на стрим
             String searchName = args[0];
@@ -73,7 +108,17 @@ public class TwitchCommand implements CommandExecutor, Listener {
                 player.sendMessage(plugin.getMessage("invalid_link"));
                 return true;
             }
-            streamerManager.addStreamer(mcName, twitchName, url);
+            // проверека дублоирование
+            boolean exists = streamerManager.getStreamers().stream().anyMatch(s ->
+                s.mcName.equalsIgnoreCase(mcName) ||
+                s.twitchName.equalsIgnoreCase(twitchName) ||
+                s.url.equalsIgnoreCase(url)
+            );
+            if (exists) {
+                player.sendMessage("§cСтример с таким ником, Twitch-ником или ссылкой уже есть в списке.");
+                return true;
+            }
+            streamerManager.addStreamer(mcName, twitchName, url, "");
             player.sendMessage(plugin.getMessage("streamer_added", mcName, url, twitchName));
             return true;
         }
