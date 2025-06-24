@@ -26,10 +26,12 @@ public class TwitchAnnounceTask implements Runnable {
                 .collect(Collectors.toList());
         if (!liveStreamers.isEmpty()) {
             for (StreamerInfo s : liveStreamers) {
-                String msg = plugin.getConfig().getString("messages.stream_repeat_broadcast", "{player} стрим: {link}")
-                        .replace("{player}", s.mcName)
-                        .replace("{link}", s.url);
-                Bukkit.broadcastMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
+                if (Bukkit.getPlayerExact(s.mcName) != null) {
+                    String msg = plugin.getConfig().getString("messages.stream_repeat_broadcast", "{player} стрим: {link}")
+                            .replace("{player}", s.mcName)
+                            .replace("{link}", s.url);
+                    Bukkit.broadcastMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
+                }
             }
         }
     }
