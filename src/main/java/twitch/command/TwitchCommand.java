@@ -40,6 +40,10 @@ public class TwitchCommand implements CommandExecutor, Listener {
         Player player = (Player) sender;
         // /стрим стоп
         if (args.length == 1 && args[0].equalsIgnoreCase("стоп")) {
+            if (!player.hasPermission("twitch.stream")) {
+                player.sendMessage(plugin.getMessage("no_permission"));
+                return true;
+            }
             LuckPerms luckPerms = plugin.getLuckPerms();
             if (luckPerms != null) {
                 luckPerms.getUserManager().loadUser(player.getUniqueId()).thenAcceptAsync(user -> {
@@ -55,6 +59,10 @@ public class TwitchCommand implements CommandExecutor, Listener {
         }
         // /стрим <ссылка> <описание>
         if (args.length >= 1 && (args[0].startsWith("https://www.twitch.tv/") || args[0].startsWith("https://twitch.tv/"))) {
+            if (!player.hasPermission("twitch.stream")) {
+                player.sendMessage(plugin.getMessage("no_permission"));
+                return true;
+            }
             String url = args[0];
             String desc = args.length > 1 ? String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length)) : "";
             String mcName = player.getName();

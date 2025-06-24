@@ -8,7 +8,7 @@ messages:
   usage: "&eИспользуйте: /стрим <ссылка> или /стрим стоп"
   only_player: "&cТолько игрок может использовать эту команду!"
   invalid_link: "&cВведите корректную ссылку на Twitch!"
-  show_streamer: "§aTwitch канал §f{desc}: &9{link}"
+  show_streamer: "§aTwitch канал &f{player} §f{desc}- &9{link}"
   streamer_not_found: "§cСтример не найден!"
   streamer_added: "§aСтример {player} (Twitch: {desc}) добавлен!"
   no_add_permission: "§cУ вас нет прав на добавление стримеров!"
