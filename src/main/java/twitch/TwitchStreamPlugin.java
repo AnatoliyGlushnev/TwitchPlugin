@@ -9,70 +9,23 @@ import net.luckperms.api.LuckPerms;
 import net.luckperms.api.LuckPermsProvider;
 import net.luckperms.api.node.NodeType;
 
+import twitch.model.StreamerInfo;
+import twitch.service.StreamerManager;
+import twitch.service.TwitchApiService;
+import twitch.command.TwitchCommand;
+
 public class TwitchStreamPlugin extends JavaPlugin {
     private FileConfiguration config;
-
     private TwitchCommand twitchCommand;
     private LuckPerms luckPerms;
-
     private String clientId;
     private String oauthToken;
-    private String twitchGroup = "Группа"; // Группа для выдачи
-    private java.util.List<StreamerInfo> streamers = new java.util.ArrayList<>();
-
-    public java.util.List<StreamerInfo> getStreamers() {
-        return streamers;
-    }
+    private String twitchGroup = "twitch_on"; // Группа для выдачи
+    private TwitchApiService twitchApiService;
+    private StreamerManager streamerManager;
 
     public String getTwitchGroup() {
         return twitchGroup;
-    }
-
-    public void addStreamer(String mcName, String twitchName, String url) {
-        streamers.add(new StreamerInfo(mcName, twitchName, url));
-        java.util.List<java.util.Map<String, Object>> rawList = new java.util.ArrayList<>();
-        for (StreamerInfo s : streamers) {
-            java.util.Map<String, Object> map = new java.util.HashMap<>();
-            map.put("mc", s.mcName);
-            map.put("twitch", s.twitchName);
-            map.put("url", s.url);
-            rawList.add(map);
-        }
-        config.set("twitch.streamers", rawList);
-        saveConfig();
-        reloadPlugin();
-    }
-    private java.util.Map<String, Boolean> streamerLiveStatus = new java.util.HashMap<>();
-
-    public java.util.Map<String, Boolean> getStreamerLiveStatus() {
-        return streamerLiveStatus;
-    }
-
-    public static class StreamerInfo {
-        public final String mcName;
-        public final String twitchName;
-        public final String url;
-        public StreamerInfo(String mcName, String twitchName, String url) {
-            this.mcName = mcName;
-            this.twitchName = twitchName;
-            this.url = url;
-        }
-    }
-
-    private void loadStreamersFromConfig() {
-        streamers.clear();
-        java.util.List<?> rawList = config.getMapList("twitch.streamers");
-        for (Object obj : rawList) {
-            if (obj instanceof java.util.Map) {
-                java.util.Map<?, ?> map = (java.util.Map<?, ?>) obj;
-                String mc = (String) map.get("mc");
-                String twitch = (String) map.get("twitch");
-                String url = (String) map.get("url");
-                if (mc != null && twitch != null && url != null) {
-                    streamers.add(new StreamerInfo(mc, twitch, url));
-                }
-            }
-        }
     }
 
     @Override
@@ -81,8 +34,10 @@ public class TwitchStreamPlugin extends JavaPlugin {
         this.config = getConfig();
         this.clientId = config.getString("twitch.client_id");
         this.oauthToken = config.getString("twitch.oauth_token");
-        loadStreamersFromConfig();
+        this.streamerManager = new StreamerManager(config);
         this.luckPerms = getServer().getServicesManager().load(LuckPerms.class);
+        this.twitchApiService = new TwitchApiService(clientId, oauthToken, getLogger());
+        this.twitchApiService.validateConnection();
         if (this.luckPerms == null) {
             getLogger().severe("LuckPerms не найден! Плагин не сможет выдавать группы.");
         }
@@ -104,12 +59,12 @@ public class TwitchStreamPlugin extends JavaPlugin {
     public void reloadPlugin() {
         this.clientId = config.getString("twitch.client_id");
         this.oauthToken = config.getString("twitch.oauth_token");
-        this.twitchGroup = config.getString("twitch.group", "Группа"); // Группа для выдачи
-        loadStreamersFromConfig();
+        this.twitchGroup = config.getString("twitch.group", "twitch_on"); // Группа для выдачи
+        this.streamerManager = new StreamerManager(config);
         if (twitchCommand != null) {
             HandlerList.unregisterAll(twitchCommand);
         }
-        twitchCommand = new TwitchCommand(this);
+        twitchCommand = new TwitchCommand(this, streamerManager);
         getCommand("стрим").setExecutor(twitchCommand);
         startStreamChecker();
     }
@@ -117,7 +72,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
         getServer().getGlobalRegionScheduler().runAtFixedRate(
             this,
             task -> {
-                for (StreamerInfo streamer : streamers) {
+                for (StreamerInfo streamer : streamerManager.getStreamers()) {
                     checkTwitchStream(streamer);
                 }
             },
@@ -128,28 +83,17 @@ public class TwitchStreamPlugin extends JavaPlugin {
 
     private void checkTwitchStream(StreamerInfo streamer) {
         try {
-            
-            java.net.URL url = new java.net.URL("https://api.twitch.tv/helix/streams?user_login=" + streamer.twitchName);
-            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty("Client-Id", clientId);
-            conn.setRequestProperty("Authorization", "Bearer " + oauthToken);
-            java.io.BufferedReader in = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
-            String inputLine;
-            StringBuilder response = new StringBuilder();
-            while ((inputLine = in.readLine()) != null) {
-                response.append(inputLine);
-            }
-            in.close();
-            boolean isLive = response.toString().contains("\"type\":\"live\"");
-            boolean wasLive = streamerLiveStatus.getOrDefault(streamer.twitchName.toLowerCase(), false);
+            String response = twitchApiService.sendGetRequest("https://api.twitch.tv/helix/streams?user_login=" + streamer.twitchName);
+            boolean isLive = response.contains("\"type\":\"live\"");
+            boolean wasLive = streamerManager.getStreamerLiveStatus().getOrDefault(streamer.twitchName.toLowerCase(), false);
             
             if (isLive && !wasLive) {
     getLogger().info("Стрим начался для " + streamer.mcName + " (Twitch: " + streamer.twitchName + ")");
     getServer().getGlobalRegionScheduler().execute(this, () -> {
         org.bukkit.entity.Player streamerPlayer = org.bukkit.Bukkit.getPlayerExact(streamer.mcName);
         if (streamerPlayer != null) {
-            net.md_5.bungee.api.chat.TextComponent msg = new net.md_5.bungee.api.chat.TextComponent("Стрим на Twitch канале " + streamer.mcName + ": ");
+            String streamMsg = getMessage("stream_start_broadcast", streamer.mcName, streamer.url, streamer.twitchName);
+            net.md_5.bungee.api.chat.TextComponent msg = new net.md_5.bungee.api.chat.TextComponent(streamMsg.replace("{link}", ""));
             net.md_5.bungee.api.chat.TextComponent link = new net.md_5.bungee.api.chat.TextComponent(streamer.url);
             link.setColor(net.md_5.bungee.api.ChatColor.BLUE);
             link.setUnderlined(true);
@@ -187,65 +131,13 @@ public class TwitchStreamPlugin extends JavaPlugin {
                     }
                 });
             }
-            streamerLiveStatus.put(streamer.twitchName.toLowerCase(), isLive);
+            streamerManager.getStreamerLiveStatus().put(streamer.twitchName.toLowerCase(), isLive);
         } catch (Exception e) {
             java.io.StringWriter sw = new java.io.StringWriter();
             e.printStackTrace(new java.io.PrintWriter(sw));
             getLogger().warning("Ошибка при проверке Twitch для " + streamer.twitchName + ": " + sw.toString());
         }
     }
-
-    public void addStreamer(String name, String url) {
-        java.util.List<?> rawList = config.getMapList("twitch.streamers");
-        java.util.List<java.util.Map<String, Object>> streamerList = new java.util.ArrayList<>();
-        for (Object obj : rawList) {
-            if (obj instanceof java.util.Map) {
-                java.util.Map<?, ?> rawMap = (java.util.Map<?, ?>) obj;
-                java.util.Map<String, Object> safeMap = new java.util.HashMap<>();
-                for (java.util.Map.Entry<?, ?> entry : rawMap.entrySet()) {
-                    if (entry.getKey() != null) {
-                        safeMap.put(entry.getKey().toString(), entry.getValue());
-                    }
-                }
-                streamerList.add(safeMap);
-            }
-        }
-        java.util.Map<String, Object> newStreamer = new java.util.HashMap<>();
-        newStreamer.put("name", name);
-        newStreamer.put("url", url);
-        streamerList.add(newStreamer);
-        config.set("twitch.streamers", streamerList);
-        saveConfig();
-        
-    }
-
-    public void removeStreamer(String name) {
-    java.util.List<?> rawList = config.getMapList("twitch.streamers");
-    java.util.List<java.util.Map<String, Object>> streamerList = new java.util.ArrayList<>();
-    for (Object obj : rawList) {
-        if (obj instanceof java.util.Map) {
-            java.util.Map<?, ?> rawMap = (java.util.Map<?, ?>) obj;
-            java.util.Map<String, Object> safeMap = new java.util.HashMap<>();
-            for (java.util.Map.Entry<?, ?> entry : rawMap.entrySet()) {
-                if (entry.getKey() != null) {
-                    safeMap.put(entry.getKey().toString(), entry.getValue());
-                }
-            }
-            streamerList.add(safeMap);
-        }
-    }
-    int before = streamerList.size();
-    streamerList.removeIf(map ->
-        name.equalsIgnoreCase((String) map.get("mc")) ||
-        name.equalsIgnoreCase((String) map.get("twitch"))
-    );
-    int after = streamerList.size();
-    getLogger().info("[DEBUG] removeStreamer: удалено " + (before - after) + " стример(ов) по запросу '" + name + "'.");
-    config.set("twitch.streamers", streamerList);
-    saveConfig();
-    streamers.removeIf(s -> name.equalsIgnoreCase(s.mcName) || name.equalsIgnoreCase(s.twitchName));
-    reloadPlugin();
-}
 
     public String getMessage(String key, String player, String link) {
         return getMessage(key, player, link, "");
