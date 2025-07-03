@@ -30,7 +30,11 @@ public class TwitchAnnounceTask implements Runnable {
                     String msg = plugin.getConfig().getString("messages.stream_repeat_broadcast", "{player} стрим: {link}")
                             .replace("{player}", s.mcName)
                             .replace("{link}", s.url);
-                    Bukkit.broadcastMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
+                    for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                        Bukkit.getRegionScheduler().run(plugin, p.getLocation(), task -> {
+                            p.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
+                        });
+                    }
                 }
             }
         }
