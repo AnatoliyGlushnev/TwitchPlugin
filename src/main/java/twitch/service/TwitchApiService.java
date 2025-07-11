@@ -24,14 +24,43 @@ public class TwitchApiService {
         conn.setRequestMethod("GET");
         conn.setRequestProperty("Client-Id", clientId);
         conn.setRequestProperty("Authorization", "Bearer " + oauthToken);
-        BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-        String inputLine;
-        StringBuilder response = new StringBuilder();
-        while ((inputLine = in.readLine()) != null) {
-            response.append(inputLine);
+
+        int responseCode = conn.getResponseCode();
+        if (responseCode == 429) {
+            logger.warning("[TWITCH API] Превышен лимит запросов к Twitch API (429 Too Many Requests). Попробуйте позже.");
+            return "{\"error\": \"rate_limit\", \"message\": \"Превышен лимит запросов к Twitch API. Попробуйте позже.\"}";
+        } else if (responseCode == 401 || responseCode == 403) {
+            // Ошибка при авторизации API
+            try (BufferedReader err = new BufferedReader(new InputStreamReader(conn.getErrorStream()))) {
+                StringBuilder errorResponse = new StringBuilder();
+                String line;
+                while ((line = err.readLine()) != null) {
+                    errorResponse.append(line);
+                }
+                logger.warning("[TWITCH API] Ошибка авторизации (" + responseCode + "): " + errorResponse);
+                return "{\"error\": \"auth_error\", \"code\": " + responseCode + ", \"message\": \"" + errorResponse + "\"}";
+            }
+        } else if (responseCode >= 400) {
+            // Другие возможные ошибки API
+            try (BufferedReader err = new BufferedReader(new InputStreamReader(conn.getErrorStream()))) {
+                StringBuilder errorResponse = new StringBuilder();
+                String line;
+                while ((line = err.readLine()) != null) {
+                    errorResponse.append(line);
+                }
+                logger.warning("[TWITCH API] Ошибка " + responseCode + ": " + errorResponse);
+                return "{\"error\": \"http_error\", \"code\": " + responseCode + ", \"message\": \"" + errorResponse + "\"}";
+            }
         }
-        in.close();
-        return response.toString();
+        // успешный поток
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+            String inputLine;
+            StringBuilder response = new StringBuilder();
+            while ((inputLine = in.readLine()) != null) {
+                response.append(inputLine);
+            }
+            return response.toString();
+        }
     }
 
     public void validateConnection() {

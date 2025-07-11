@@ -16,6 +16,7 @@ import twitch.service.TwitchAnnounceTask;
 import twitch.command.TwitchCommand;
 
 public class TwitchStreamPlugin extends JavaPlugin {
+    private java.util.concurrent.ExecutorService executorService; //асинхронная задач
     private FileConfiguration config;
     private TwitchCommand twitchCommand;
     private LuckPerms luckPerms;
@@ -32,6 +33,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        this.executorService = java.util.concurrent.Executors.newCachedThreadPool();
         saveDefaultConfig();
         this.config = getConfig();
         this.clientId = config.getString("twitch.client_id");
@@ -102,66 +104,80 @@ public class TwitchStreamPlugin extends JavaPlugin {
     }
 
     private void checkTwitchStream(StreamerInfo streamer) {
-        try {
-            String response = twitchApiService.sendGetRequest("https://api.twitch.tv/helix/streams?user_login=" + streamer.twitchName);
-            boolean isLive = response.contains("\"type\":\"live\"");
-            boolean wasLive = streamerManager.getStreamerLiveStatus().getOrDefault(streamer.twitchName.toLowerCase(), false);
-            
-            if (isLive && !wasLive) {
-    getLogger().info("Стрим начался для " + streamer.mcName + " (Twitch: " + streamer.twitchName + ")");
-    getServer().getGlobalRegionScheduler().execute(this, () -> {
-        org.bukkit.entity.Player streamerPlayer = org.bukkit.Bukkit.getPlayerExact(streamer.mcName);
-        if (streamerPlayer != null) {
-            String streamMsg = getMessage("stream_start_broadcast", streamer.mcName, streamer.url, streamer.twitchName);
-            net.md_5.bungee.api.chat.TextComponent msg = new net.md_5.bungee.api.chat.TextComponent(streamMsg.replace("{link}", ""));
-            net.md_5.bungee.api.chat.TextComponent link = new net.md_5.bungee.api.chat.TextComponent(streamer.url);
-            link.setColor(net.md_5.bungee.api.ChatColor.BLUE);
-            link.setUnderlined(true);
-            link.setClickEvent(new net.md_5.bungee.api.chat.ClickEvent(net.md_5.bungee.api.chat.ClickEvent.Action.OPEN_URL, streamer.url));
-            for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
-                p.sendMessage(msg.getText());
-            }
-            // префикс через LuckPerms
-            LuckPerms luckPerms = getLuckPerms();
-            if (luckPerms != null) {
-                java.util.UUID uuid = streamerPlayer.getUniqueId();
-                luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user -> {
-                    user.data().add(net.luckperms.api.node.types.InheritanceNode.builder(getTwitchGroup()).build());
-                    luckPerms.getUserManager().saveUser(user);
-                });
-            }
-        }
-    });
-} else if (!isLive && wasLive) {
-                getLogger().info("Стрим завершён для " + streamer.mcName + " (Twitch: " + streamer.twitchName + ")");
-                getServer().getGlobalRegionScheduler().execute(this, () -> {
-                    LuckPerms luckPerms = getLuckPerms();
-                    if (luckPerms != null) {
-                        org.bukkit.entity.Player player = org.bukkit.Bukkit.getPlayerExact(streamer.mcName);
-                        if (player != null) {
-                            java.util.UUID uuid = player.getUniqueId();
-                            luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user -> 
-                            {
-                                user.data().clear(node -> node instanceof net.luckperms.api.node.types.InheritanceNode &&
-    ((net.luckperms.api.node.types.InheritanceNode) node).getGroupName().equalsIgnoreCase(getTwitchGroup()));
-                                luckPerms.getUserManager().saveUser(user);
-                            });
+        executorService.submit(() -> {
+            try {
+                String response = twitchApiService.sendGetRequest("https://api.twitch.tv/helix/streams?user_login=" + streamer.twitchName);
+                boolean isLive = response.contains("\"type\":\"live\"");
+                boolean wasLive = streamerManager.getStreamerLiveStatus().getOrDefault(streamer.twitchName.toLowerCase(), false);
+
+                streamerManager.getStreamerLiveStatus().put(streamer.twitchName.toLowerCase(), isLive);
+
+                if (isLive && !wasLive) {
+                    getLogger().info("Стрим начался для " + streamer.mcName + " (Twitch: " + streamer.twitchName + ")");
+                    getServer().getGlobalRegionScheduler().execute(this, () -> {
+                        org.bukkit.entity.Player streamerPlayer = org.bukkit.Bukkit.getPlayerExact(streamer.mcName);
+                        if (streamerPlayer != null) {
+                            String streamMsg = getMessage("stream_start_broadcast", streamer.mcName, streamer.url, streamer.twitchName);
+                            net.md_5.bungee.api.chat.TextComponent msg = new net.md_5.bungee.api.chat.TextComponent(streamMsg.replace("{link}", ""));
+                            net.md_5.bungee.api.chat.TextComponent link = new net.md_5.bungee.api.chat.TextComponent(streamer.url);
+                            link.setColor(net.md_5.bungee.api.ChatColor.BLUE);
+                            link.setUnderlined(true);
+                            link.setClickEvent(new net.md_5.bungee.api.chat.ClickEvent(net.md_5.bungee.api.chat.ClickEvent.Action.OPEN_URL, streamer.url));
+                            for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                                p.sendMessage(msg.getText());
+                            }
+                            // префикс через LuckPerms
+                            LuckPerms luckPerms = getLuckPerms();
+                            if (luckPerms != null) {
+                                java.util.UUID uuid = streamerPlayer.getUniqueId();
+                                luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user -> {
+                                    user.data().add(net.luckperms.api.node.types.InheritanceNode.builder(getTwitchGroup()).build());
+                                    luckPerms.getUserManager().saveUser(user);
+                                });
+                            }
                         }
-                    }
-                });
+                    });
+                } else if (!isLive && wasLive) {
+                    getLogger().info("Стрим завершён для " + streamer.mcName + " (Twitch: " + streamer.twitchName + ")");
+                    getServer().getGlobalRegionScheduler().execute(this, () -> {
+                        LuckPerms luckPerms = getLuckPerms();
+                        if (luckPerms != null) {
+                            org.bukkit.entity.Player player = org.bukkit.Bukkit.getPlayerExact(streamer.mcName);
+                            if (player != null) {
+                                java.util.UUID uuid = player.getUniqueId();
+                                luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user ->
+                                {
+                                    user.data().clear(node -> node instanceof net.luckperms.api.node.types.InheritanceNode &&
+                                            ((net.luckperms.api.node.types.InheritanceNode) node).getGroupName().equalsIgnoreCase(getTwitchGroup()));
+                                    luckPerms.getUserManager().saveUser(user);
+                                });
+                            }
+                        }
+                    });
+                }
+            } catch (Exception e) {
+                java.io.StringWriter sw = new java.io.StringWriter();
+                e.printStackTrace(new java.io.PrintWriter(sw));
+                getLogger().warning("Ошибка при проверке Twitch для " + streamer.twitchName + ": " + sw.toString());
             }
-            streamerManager.getStreamerLiveStatus().put(streamer.twitchName.toLowerCase(), isLive);
-        } catch (Exception e) {
-            java.io.StringWriter sw = new java.io.StringWriter();
-            e.printStackTrace(new java.io.PrintWriter(sw));
-            getLogger().warning("Ошибка при проверке Twitch для " + streamer.twitchName + ": " + sw.toString());
-        }
+        });
     }
 
     public String getMessage(String key, String player, String link) {
         return getMessage(key, player, link, "");
     }
-
+    
+    @Override
+    public void onDisable() {
+        if (executorService != null) {
+            executorService.shutdownNow();
+        }
+        if (announceTask != null) {
+            announceTask.cancel();
+        }
+        getLogger().info("[TWITCH] Плагин успешно выгружен.");
+    }
+    
     public String getMessage(String key, String player, String link, String desc) {
         String msg = config.getString("messages." + key, "");
         msg = msg.replace("{player}", player).replace("{link}", link).replace("{desc}", desc);

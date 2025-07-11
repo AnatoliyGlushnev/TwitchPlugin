@@ -31,7 +31,7 @@ public class TwitchCommand implements CommandExecutor, Listener {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
-            sender.sendMessage(plugin.getMessage("usage"));
+            sender.sendMessage("§eИспользуйте: /стрим список или /стрим <ник>");
             return true;
         }
 
@@ -53,6 +53,14 @@ public class TwitchCommand implements CommandExecutor, Listener {
                 String url = args[3];
                 if (!(url.startsWith("https://www.twitch.tv/") || url.startsWith("https://twitch.tv/"))) {
                     sender.sendMessage(plugin.getMessage("invalid_link"));
+                    yield true;
+                }
+                // соответствия ника Twitch и ника в ссылке
+                String nameFromUrl = url.replace("https://www.twitch.tv/", "")
+                                       .replace("https://twitch.tv/", "")
+                                       .replaceAll("/", "");
+                if (!twitchName.equalsIgnoreCase(nameFromUrl)) {
+                    sender.sendMessage("§cОшибка: ник Twitch в поле и в ссылке не совпадают. Проверьте ввод.");
                     yield true;
                 }
                 boolean exists = streamerManager.getStreamers().stream().anyMatch(s ->
@@ -104,29 +112,21 @@ public class TwitchCommand implements CommandExecutor, Listener {
                 yield true;
             }
             case "список" -> {
-                if (!(sender instanceof Player)) {
-                    sender.sendMessage(plugin.getMessage("only_player"));
-                    yield true;
-                }
-                Player player = (Player) sender;
-                player.sendMessage(plugin.getMessage("streamer_list_header"));
+                sender.sendMessage(plugin.getMessage("streamer_list_header"));
                 for (StreamerInfo s : streamerManager.getStreamers()) {
-                    player.sendMessage(plugin.getMessage("streamer_list_entry", s.mcName, s.url, s.twitchName));
+                    sender.sendMessage(plugin.getMessage("streamer_list_entry", s.mcName, s.url, s.twitchName));
                 }
                 yield true;
             }
             case "reload" -> {
-                if (!(sender instanceof Player)) {
-                    sender.sendMessage(plugin.getMessage("only_player"));
-                    yield true;
-                }
-                Player player = (Player) sender;
-                if (!player.isOp() && !player.hasPermission("twitch.stream.admin")) {
-                    player.sendMessage(plugin.getMessage("no_reload_permission"));
-                    yield true;
+                if (sender instanceof Player player) {
+                    if (!player.isOp() && !player.hasPermission("twitch.stream.admin")) {
+                        player.sendMessage(plugin.getMessage("no_reload_permission"));
+                        yield true;
+                    }
                 }
                 plugin.reloadTwitchConfig();
-                player.sendMessage(plugin.getMessage("reload_success"));
+                sender.sendMessage(plugin.getMessage("reload_success"));
                 yield true;
             }
             case "статус" -> {
