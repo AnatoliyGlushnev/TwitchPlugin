@@ -2,6 +2,7 @@ name: TwitchStream
 main: twitch.TwitchStreamPlugin
 version: 1.0
 api-version: 1.21
+depend: [LuckPerms]
 commands:
   стрим:
     description: Управление стримом на Twitch
