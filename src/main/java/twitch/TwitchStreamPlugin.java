@@ -35,23 +35,34 @@ public class TwitchStreamPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+    getLogger().info("[TWITCH INIT] Вызван onEnable(). Начало инициализации плагина...");
+        getLogger().info("[TWITCH INIT] Инициализация ExecutorService...");
         this.executorService = java.util.concurrent.Executors.newCachedThreadPool();
+        getLogger().info("[TWITCH INIT] Сохранение/загрузка стандартного конфига...");
         saveDefaultConfig();
         this.config = getConfig();
         this.clientId = config.getString("twitch.client_id");
         this.oauthToken = config.getString("twitch.oauth_token");
         this.streamerManager = new StreamerManager(config);
+        getLogger().info("[TWITCH INIT] Загрузка API LuckPerms...");
         this.luckPerms = getServer().getServicesManager().load(LuckPerms.class);
+        getLogger().info("[TWITCH INIT] Инициализация TwitchApiService...");
         this.twitchApiService = new TwitchApiService(clientId, oauthToken, getLogger());
-        this.twitchApiService.validateConnection();
+    // Валидация подключения к Twitch API, чтобы не блокировать основной поток
+        getLogger().info("[TWITCH INIT] Отправка задачи проверки подключения к Twitch API в отдельный поток...");
+        executorService.submit(() -> this.twitchApiService.validateConnection());
+        getLogger().info("[TWITCH INIT] Чтение twitch-группы из конфига...");
         this.twitchGroup = config.getString("group", "twitch_on"); // по умолчанию
+        getLogger().info("[TWITCH INIT] Проверка LuckPerms...");
         if (this.luckPerms == null) {
             getLogger().severe("LuckPerms не найден! Плагин не сможет выдавать группы.");
         }
+        getLogger().info("[TWITCH INIT] Запуск задачи анонса стримеров...");
         // анонс стримеров
         startAnnounceTask();
         reloadPlugin();
-        getLogger().info("[TWITCH PLUGIN ANNONCE] TwitchStreamPlugin работает.");
+        getLogger().info("[TWITCH INIT] Инициализация завершена!");
+        getLogger().info("[TWITCH] TwitchStreamPlugin работает.");
     }
 
     public String getMessage(String key) {
@@ -97,8 +108,10 @@ public class TwitchStreamPlugin extends JavaPlugin {
             this,
             task -> {
                 for (StreamerInfo streamer : streamerManager.getStreamers()) {
-                    checkTwitchStream(streamer);
-                }
+    if (org.bukkit.Bukkit.getPlayerExact(streamer.mcName) != null) {
+        checkTwitchStream(streamer);
+    }
+}
             },
             1L,
             checkPeriod
