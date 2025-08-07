@@ -126,7 +126,6 @@ public class TwitchStreamPlugin extends JavaPlugin {
                 boolean wasLive = streamerManager.getStreamerLiveStatus().getOrDefault(streamer.twitchName.toLowerCase(), false);
 
                 streamerManager.getStreamerLiveStatus().put(streamer.twitchName.toLowerCase(), isLive);
-
                 if (isLive && !wasLive) {
                     getLogger().info("Стрим начался для " + streamer.mcName + " (Twitch: " + streamer.twitchName + ")");
                     getServer().getGlobalRegionScheduler().execute(this, () -> {
@@ -173,24 +172,19 @@ public class TwitchStreamPlugin extends JavaPlugin {
             } catch (Exception e) {
                 Throwable cause = e.getCause() != null ? e.getCause() : e;
                 String msg = cause.getMessage() != null ? cause.getMessage() : cause.toString();
-                if (cause instanceof java.net.ConnectException ||
-    cause instanceof java.net.UnknownHostException ||
-    cause instanceof java.net.SocketTimeoutException ||
-    cause instanceof javax.net.ssl.SSLException ||
-    msg.toLowerCase().contains("timed out") ||
-    msg.toLowerCase().contains("connection refused")) {
-    // Rate limiting
-    String errorKey = streamer.twitchName.toLowerCase() + ":" + cause.getClass().getSimpleName();
-    long now = System.currentTimeMillis();
-    synchronized (TwitchStreamPlugin.class) {
-        if (lastErrorLogTime == null) lastErrorLogTime = new java.util.HashMap<>();
-        Long last = lastErrorLogTime.get(errorKey);
-        if (last == null || now - last > 60_000) {
-            getLogger().info("[TwitchStream] Не удалось проверить Twitch для " + streamer.twitchName + ": " + msg);
-            lastErrorLogTime.put(errorKey, now);
-        }
-    }
-
+                if (isTemporaryNetworkError(cause, msg)) {
+                
+                    String errorKey = streamer.twitchName.toLowerCase() + ":" + cause.getClass().getSimpleName();
+                    long now = System.currentTimeMillis();
+                    synchronized (TwitchStreamPlugin.class) {
+                        if (lastErrorLogTime == null) lastErrorLogTime = new java.util.HashMap<>();
+                        Long last = lastErrorLogTime.get(errorKey);
+                        if (last == null || now - last > 60_000) {
+                            getLogger().info("[TwitchStream] Не удалось проверить Twitch для " + streamer.twitchName + ": " + msg);
+                            lastErrorLogTime.put(errorKey, now);
+                        }
+                    }
+                    return;
                 } else {
                     java.io.StringWriter sw = new java.io.StringWriter();
                     e.printStackTrace(new java.io.PrintWriter(sw));
@@ -198,6 +192,15 @@ public class TwitchStreamPlugin extends JavaPlugin {
                 }
             }
         });
+    }
+
+    private boolean isTemporaryNetworkError(Throwable cause, String msg) {
+        return cause instanceof java.net.ConnectException ||
+                cause instanceof java.net.UnknownHostException ||
+                cause instanceof java.net.SocketTimeoutException ||
+                cause instanceof javax.net.ssl.SSLException ||
+                msg.toLowerCase().contains("timed out") ||
+                msg.toLowerCase().contains("connection refused");
     }
 
     public String getMessage(String key, String player, String link) {
