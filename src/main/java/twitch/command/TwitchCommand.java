@@ -107,7 +107,12 @@ public class TwitchCommand implements CommandExecutor, Listener {
                         luckPerms.getUserManager().saveUser(user);
                     });
                 }
-                streamerManager.removeStreamer(player.getName());
+                StreamerInfo me = streamerManager.getStreamers().stream()
+                        .filter(s -> s.mcName.equalsIgnoreCase(player.getName()))
+                        .findFirst().orElse(null);
+                if (me != null) {
+                    streamerManager.getStreamerLiveStatus().put(me.twitchName.toLowerCase(), false);
+                }
                 player.sendMessage("§aВы остановили стрим. Группа снята.");
                 yield true;
             }
