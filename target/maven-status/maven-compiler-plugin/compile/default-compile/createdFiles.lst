@@ -1,6 +1,0 @@
-twitch\model\StreamerInfo.class
-twitch\command\TwitchCommand.class
-twitch\service\TwitchAnnounceTask.class
-twitch\service\StreamerManager.class
-twitch\service\TwitchApiService.class
-twitch\TwitchStreamPlugin.class
