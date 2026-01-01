@@ -23,6 +23,9 @@ messages:
   streamer_status_offline: "§eСтример {player} сейчас оффлайн."
   stream_start_broadcast: "§d[СТРИМ] §a{player} §fначал стрим\n&9{link}"
   stream_repeat_broadcast: "§d[СТРИМ] §a{player} §fстрим: &9{link}"
+  streamers_online_header: "§d[СТРИМ] §fСейчас в эфире:"
+  streamers_online_none: "§d[СТРИМ] §7Сейчас никто не стримит."
+  streamers_online_entry: "§b• §a{player} §7(§5Twitch: {desc}§7)"
 
 twitch:
   # группа, которая выдается стримеру, когда он на стриме

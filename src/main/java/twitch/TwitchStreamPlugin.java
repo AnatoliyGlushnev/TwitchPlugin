@@ -132,13 +132,18 @@ public class TwitchStreamPlugin extends JavaPlugin {
                         org.bukkit.entity.Player streamerPlayer = org.bukkit.Bukkit.getPlayerExact(streamer.mcName);
                         if (streamerPlayer != null) {
                             String streamMsg = getMessage("stream_start_broadcast", streamer.mcName, streamer.url, streamer.twitchName);
-                            net.md_5.bungee.api.chat.TextComponent msg = new net.md_5.bungee.api.chat.TextComponent(streamMsg.replace("{link}", ""));
+                            String streamMsgWithoutUrl = streamMsg.replace(streamer.url, "").trim();
                             net.md_5.bungee.api.chat.TextComponent link = new net.md_5.bungee.api.chat.TextComponent(streamer.url);
                             link.setColor(net.md_5.bungee.api.ChatColor.BLUE);
                             link.setUnderlined(true);
                             link.setClickEvent(new net.md_5.bungee.api.chat.ClickEvent(net.md_5.bungee.api.chat.ClickEvent.Action.OPEN_URL, streamer.url));
                             for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
-                                p.sendMessage(msg.getText());
+                                org.bukkit.Bukkit.getRegionScheduler().run(this, p.getLocation(), task -> {
+                                    if (!streamMsgWithoutUrl.isEmpty()) {
+                                        p.sendMessage(streamMsgWithoutUrl);
+                                    }
+                                    p.spigot().sendMessage(link);
+                                });
                             }
                             // префикс через LuckPerms
                             LuckPerms luckPerms = getLuckPerms();

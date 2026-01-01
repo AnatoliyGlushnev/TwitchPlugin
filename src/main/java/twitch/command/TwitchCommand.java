@@ -11,10 +11,17 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.node.types.InheritanceNode;
 
+import net.md_5.bungee.api.ChatColor;
+import net.md_5.bungee.api.chat.ClickEvent;
+import net.md_5.bungee.api.chat.TextComponent;
+
 import twitch.TwitchStreamPlugin;
 import twitch.model.StreamerInfo;
 import twitch.service.StreamerManager;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /* Команда /стрим и обработка событий входа */
@@ -27,6 +34,7 @@ public class TwitchCommand implements CommandExecutor, Listener {
         this.streamerManager = streamerManager;
         org.bukkit.Bukkit.getPluginManager().registerEvents(this, plugin);
     }
+
     // Обработка команды /стрим
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
@@ -120,6 +128,44 @@ public class TwitchCommand implements CommandExecutor, Listener {
                 sender.sendMessage(plugin.getMessage("streamer_list_header"));
                 for (StreamerInfo s : streamerManager.getStreamers()) {
                     sender.sendMessage(plugin.getMessage("streamer_list_entry", s.mcName, s.url, s.twitchName));
+                }
+                yield true;
+            }
+            case "онлайн" -> {
+                Map<String, Boolean> liveStatus = streamerManager.getStreamerLiveStatus();
+                List<StreamerInfo> liveStreamers = new ArrayList<>();
+                synchronized (streamerManager.getStreamers()) {
+                    for (StreamerInfo s : streamerManager.getStreamers()) {
+                        if (liveStatus.getOrDefault(s.twitchName.toLowerCase(), false)) {
+                            liveStreamers.add(s);
+                        }
+                    }
+                }
+
+                if (sender instanceof Player player) {
+                    if (liveStreamers.isEmpty()) {
+                        player.sendMessage(plugin.getMessage("streamers_online_none"));
+                        yield true;
+                    }
+                    player.sendMessage(plugin.getMessage("streamers_online_header"));
+                    for (StreamerInfo s : liveStreamers) {
+                        player.sendMessage(plugin.getMessage("streamers_online_entry", s.mcName, s.url, s.twitchName));
+                        TextComponent link = new TextComponent(s.url);
+                        link.setColor(ChatColor.BLUE);
+                        link.setUnderlined(true);
+                        link.setClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, s.url));
+                        player.spigot().sendMessage(link);
+                    }
+                    yield true;
+                }
+
+                if (liveStreamers.isEmpty()) {
+                    sender.sendMessage(plugin.getMessage("streamers_online_none"));
+                    yield true;
+                }
+                sender.sendMessage(plugin.getMessage("streamers_online_header"));
+                for (StreamerInfo s : liveStreamers) {
+                    sender.sendMessage(plugin.getMessage("streamers_online_entry", s.mcName, s.url, s.twitchName) + " " + s.url);
                 }
                 yield true;
             }
