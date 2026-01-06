@@ -108,10 +108,12 @@ public class TwitchStreamPlugin extends JavaPlugin {
             this,
             task -> {
                 for (StreamerInfo streamer : streamerManager.getStreamers()) {
-    if (org.bukkit.Bukkit.getPlayerExact(streamer.mcName) != null) {
-        checkTwitchStream(streamer);
-    }
-}
+                    if (org.bukkit.Bukkit.getPlayerExact(streamer.mcName) != null) {
+                        checkTwitchStream(streamer);
+                    } else {
+                        streamerManager.getStreamerLiveStatus().put(streamer.twitchName.toLowerCase(), false);
+                    }
+                }
             },
             1L,
             checkPeriod

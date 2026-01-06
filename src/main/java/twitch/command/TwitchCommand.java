@@ -136,7 +136,8 @@ public class TwitchCommand implements CommandExecutor, Listener {
                 List<StreamerInfo> liveStreamers = new ArrayList<>();
                 synchronized (streamerManager.getStreamers()) {
                     for (StreamerInfo s : streamerManager.getStreamers()) {
-                        if (liveStatus.getOrDefault(s.twitchName.toLowerCase(), false)) {
+                        if (org.bukkit.Bukkit.getPlayerExact(s.mcName) != null &&
+                                liveStatus.getOrDefault(s.twitchName.toLowerCase(), false)) {
                             liveStreamers.add(s);
                         }
                     }
