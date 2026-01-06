@@ -20,6 +20,10 @@ import twitch.storage.StreamerRepository;
 
 import com.zaxxer.hikari.HikariDataSource;
 
+import twitch.scheduler.CancellableTask;
+import twitch.scheduler.PluginScheduler;
+import twitch.scheduler.PluginSchedulerFactory;
+
 public class TwitchStreamPlugin extends JavaPlugin {
 
     private static java.util.Map<String, Long> lastErrorLogTime = new java.util.HashMap<>();
@@ -32,7 +36,9 @@ public class TwitchStreamPlugin extends JavaPlugin {
     private String twitchGroup; 
     private TwitchApiService twitchApiService;
     private StreamerManager streamerManager;
-    private io.papermc.paper.threadedregions.scheduler.ScheduledTask announceTask = null;
+    private PluginScheduler pluginScheduler;
+    private CancellableTask announceTask = null;
+    private CancellableTask streamCheckerTask = null;
     private HikariDataSource dataSource;
     private StreamerRepository streamerRepository;
 
@@ -45,6 +51,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
     getLogger().info("[TWITCH INIT] Вызван onEnable(). Начало инициализации плагина...");
         getLogger().info("[TWITCH INIT] Инициализация ExecutorService...");
         this.executorService = java.util.concurrent.Executors.newCachedThreadPool();
+        this.pluginScheduler = PluginSchedulerFactory.create(getServer());
         getLogger().info("[TWITCH INIT] Сохранение/загрузка стандартного конфига...");
         saveDefaultConfig();
         this.config = getConfig();
@@ -149,19 +156,22 @@ public class TwitchStreamPlugin extends JavaPlugin {
         if (announceTask != null) {
             announceTask.cancel();
         }
-        announceTask = getServer().getGlobalRegionScheduler().runAtFixedRate(
+        announceTask = pluginScheduler.runAtFixedRate(
             this,
-            task -> new TwitchAnnounceTask(this, streamerManager).run(),
-            announcePeriod, // initial delay
-            announcePeriod  // period
+            () -> new TwitchAnnounceTask(this, streamerManager, pluginScheduler).run(),
+            announcePeriod,
+            announcePeriod
         );
     }
 
     private void startStreamChecker() {
         long checkPeriod = config.getLong("twitch.stream_check_period", 1200L);
-        getServer().getGlobalRegionScheduler().runAtFixedRate(
+        if (streamCheckerTask != null) {
+            streamCheckerTask.cancel();
+        }
+        streamCheckerTask = pluginScheduler.runAtFixedRate(
             this,
-            task -> {
+            () -> {
                 for (StreamerInfo streamer : streamerManager.getStreamers()) {
                     String mcName = streamer.mcName == null ? "" : streamer.mcName.trim();
                     boolean isOnline = org.bukkit.Bukkit.getOnlinePlayers().stream()
@@ -188,7 +198,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
                 streamerManager.getStreamerLiveStatus().put(streamer.twitchName.toLowerCase(), isLive);
                 if (isLive && !wasLive) {
                     getLogger().info("Стрим начался для " + streamer.mcName + " (Twitch: " + streamer.twitchName + ")");
-                    getServer().getGlobalRegionScheduler().execute(this, () -> {
+                    pluginScheduler.execute(this, () -> {
                         org.bukkit.entity.Player streamerPlayer = org.bukkit.Bukkit.getPlayerExact(streamer.mcName);
                         if (streamerPlayer != null) {
                             String streamMsg = getMessage("stream_start_broadcast", streamer.mcName, streamer.url, streamer.twitchName);
@@ -198,7 +208,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
                             link.setUnderlined(true);
                             link.setClickEvent(new net.md_5.bungee.api.chat.ClickEvent(net.md_5.bungee.api.chat.ClickEvent.Action.OPEN_URL, streamer.url));
                             for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
-                                org.bukkit.Bukkit.getRegionScheduler().run(this, p.getLocation(), task -> {
+                                pluginScheduler.runForPlayer(this, p, () -> {
                                     if (!streamMsgWithoutUrl.isEmpty()) {
                                         p.sendMessage(streamMsgWithoutUrl);
                                     }
@@ -209,6 +219,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
                             LuckPerms luckPerms = getLuckPerms();
                             if (luckPerms != null) {
                                 java.util.UUID uuid = streamerPlayer.getUniqueId();
+
                                 luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user -> {
                                     user.data().add(net.luckperms.api.node.types.InheritanceNode.builder(getTwitchGroup()).build());
                                     luckPerms.getUserManager().saveUser(user);
@@ -218,12 +229,13 @@ public class TwitchStreamPlugin extends JavaPlugin {
                     });
                 } else if (!isLive && wasLive) {
                     getLogger().info("Стрим завершён для " + streamer.mcName + " (Twitch: " + streamer.twitchName + ")");
-                    getServer().getGlobalRegionScheduler().execute(this, () -> {
+                    pluginScheduler.execute(this, () -> {
                         LuckPerms luckPerms = getLuckPerms();
                         if (luckPerms != null) {
                             org.bukkit.entity.Player player = org.bukkit.Bukkit.getPlayerExact(streamer.mcName);
                             if (player != null) {
                                 java.util.UUID uuid = player.getUniqueId();
+
                                 luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user ->
                                 {
                                     user.data().clear(node -> node instanceof net.luckperms.api.node.types.InheritanceNode &&
@@ -238,7 +250,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
                 Throwable cause = e.getCause() != null ? e.getCause() : e;
                 String msg = cause.getMessage() != null ? cause.getMessage() : cause.toString();
                 if (isTemporaryNetworkError(cause, msg)) {
-                
+
                     String errorKey = streamer.twitchName.toLowerCase() + ":" + cause.getClass().getSimpleName();
                     long now = System.currentTimeMillis();
                     synchronized (TwitchStreamPlugin.class) {
@@ -279,6 +291,9 @@ public class TwitchStreamPlugin extends JavaPlugin {
         }
         if (announceTask != null) {
             announceTask.cancel();
+        }
+        if (streamCheckerTask != null) {
+            streamCheckerTask.cancel();
         }
         if (dataSource != null) {
             try {

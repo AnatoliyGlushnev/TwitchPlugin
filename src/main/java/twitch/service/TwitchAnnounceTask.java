@@ -4,6 +4,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.configuration.file.FileConfiguration;
 import twitch.model.StreamerInfo;
+import twitch.scheduler.PluginScheduler;
 
 import java.util.List;
 import java.util.Map;
@@ -12,10 +13,12 @@ import java.util.stream.Collectors;
 public class TwitchAnnounceTask implements Runnable {
     private final JavaPlugin plugin;
     private final StreamerManager streamerManager;
+    private final PluginScheduler pluginScheduler;
 
-    public TwitchAnnounceTask(JavaPlugin plugin, StreamerManager streamerManager) {
+    public TwitchAnnounceTask(JavaPlugin plugin, StreamerManager streamerManager, PluginScheduler pluginScheduler) {
         this.plugin = plugin;
         this.streamerManager = streamerManager;
+        this.pluginScheduler = pluginScheduler;
     }
 
     @Override
@@ -31,7 +34,7 @@ public class TwitchAnnounceTask implements Runnable {
                             .replace("{player}", s.mcName)
                             .replace("{link}", s.url);
                     for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
-                        Bukkit.getRegionScheduler().run(plugin, p.getLocation(), task -> {
+                        pluginScheduler.runForPlayer(plugin, p, () -> {
                             p.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
                         });
                     }
