@@ -14,6 +14,11 @@ import twitch.service.StreamerManager;
 import twitch.service.TwitchApiService;
 import twitch.service.TwitchAnnounceTask;
 import twitch.command.TwitchCommand;
+import twitch.storage.DatabaseManager;
+import twitch.storage.PostgresStreamerRepository;
+import twitch.storage.StreamerRepository;
+
+import com.zaxxer.hikari.HikariDataSource;
 
 public class TwitchStreamPlugin extends JavaPlugin {
 
@@ -28,6 +33,8 @@ public class TwitchStreamPlugin extends JavaPlugin {
     private TwitchApiService twitchApiService;
     private StreamerManager streamerManager;
     private io.papermc.paper.threadedregions.scheduler.ScheduledTask announceTask = null;
+    private HikariDataSource dataSource;
+    private StreamerRepository streamerRepository;
 
     public String getTwitchGroup() {
         return twitchGroup;
@@ -41,9 +48,35 @@ public class TwitchStreamPlugin extends JavaPlugin {
         getLogger().info("[TWITCH INIT] Сохранение/загрузка стандартного конфига...");
         saveDefaultConfig();
         this.config = getConfig();
+
+        try {
+            this.dataSource = DatabaseManager.createDataSource(this.config);
+            this.streamerRepository = new PostgresStreamerRepository(this.dataSource);
+        } catch (Exception e) {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(sw));
+            getLogger().severe("[TWITCH INIT] Не удалось инициализировать PostgreSQL: " + sw.toString());
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
         this.clientId = config.getString("twitch.client_id");
         this.oauthToken = config.getString("twitch.oauth_token");
-        this.streamerManager = new StreamerManager(config);
+        try {
+            this.streamerManager = new StreamerManager(config, streamerRepository);
+        } catch (Exception e) {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(sw));
+            getLogger().severe("[TWITCH INIT] Ошибка инициализации StreamerManager/БД: " + sw.toString());
+            try {
+                if (this.dataSource != null) {
+                    this.dataSource.close();
+                }
+            } catch (Exception ignored) {
+            }
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
         getLogger().info("[TWITCH INIT] Загрузка API LuckPerms...");
         this.luckPerms = getServer().getServicesManager().load(LuckPerms.class);
         getLogger().info("[TWITCH INIT] Инициализация TwitchApiService...");
@@ -73,6 +106,27 @@ public class TwitchStreamPlugin extends JavaPlugin {
     public void reloadTwitchConfig() {
         reloadConfig();
         this.config = getConfig();
+
+        if (this.dataSource != null) {
+            try {
+                this.dataSource.close();
+            } catch (Exception ignored) {
+            }
+            this.dataSource = null;
+        }
+        this.streamerRepository = null;
+
+        try {
+            this.dataSource = DatabaseManager.createDataSource(this.config);
+            this.streamerRepository = new PostgresStreamerRepository(this.dataSource);
+        } catch (Exception e) {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(sw));
+            getLogger().severe("[TWITCH INIT] Не удалось переинициализировать PostgreSQL: " + sw.toString());
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
+
         reloadPlugin();
     }
 
@@ -80,7 +134,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
         this.clientId = config.getString("twitch.client_id");
         this.oauthToken = config.getString("twitch.oauth_token");
         this.twitchGroup = config.getString("twitch.group", "twitch_on"); // Группа для выдачи, ПО УМОЛЧАНИЮ twitch_on
-        this.streamerManager = new StreamerManager(config);
+        this.streamerManager = new StreamerManager(config, streamerRepository);
         if (twitchCommand != null) {
             HandlerList.unregisterAll(twitchCommand);
         }
@@ -89,6 +143,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
         startStreamChecker();
         startAnnounceTask();
     }
+
     private void startAnnounceTask() {
         long announcePeriod = config.getLong("twitch.announce_period", 72000L);
         if (announceTask != null) {
@@ -108,10 +163,15 @@ public class TwitchStreamPlugin extends JavaPlugin {
             this,
             task -> {
                 for (StreamerInfo streamer : streamerManager.getStreamers()) {
-    if (org.bukkit.Bukkit.getPlayerExact(streamer.mcName) != null) {
-        checkTwitchStream(streamer);
-    }
-}
+                    String mcName = streamer.mcName == null ? "" : streamer.mcName.trim();
+                    boolean isOnline = org.bukkit.Bukkit.getOnlinePlayers().stream()
+                            .anyMatch(p -> p.getName().equalsIgnoreCase(mcName));
+                    if (isOnline) {
+                        checkTwitchStream(streamer);
+                    } else {
+                        streamerManager.getStreamerLiveStatus().put(streamer.twitchName.toLowerCase(), false);
+                    }
+                }
             },
             1L,
             checkPeriod
@@ -219,6 +279,12 @@ public class TwitchStreamPlugin extends JavaPlugin {
         }
         if (announceTask != null) {
             announceTask.cancel();
+        }
+        if (dataSource != null) {
+            try {
+                dataSource.close();
+            } catch (Exception ignored) {
+            }
         }
         getLogger().info("[TWITCH] Плагин успешно выгружен.");
     }

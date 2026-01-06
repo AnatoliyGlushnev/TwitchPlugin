@@ -21,7 +21,7 @@ messages:
   reload_success: "§aКонфиг Twitch перезагружен!"
   streamer_status_online: "§aСтример {player} сейчас В ЭФИРЕ!"
   streamer_status_offline: "§eСтример {player} сейчас оффлайн."
-  stream_start_broadcast: "§d[СТРИМ] §a{player} §fначал стрим\n&9{link}"
+  stream_start_broadcast: "§d[СТРИМ] §a{player} §fначал стрим &9{link}"
   stream_repeat_broadcast: "§d[СТРИМ] §a{player} §fстрим: &9{link}"
   streamers_online_header: "§d[СТРИМ] §fСейчас в эфире:"
   streamers_online_none: "§d[СТРИМ] §7Сейчас никто не стримит."
@@ -39,3 +39,13 @@ twitch:
   # Период анонса стримеров (в тиках)
   announce_period: 72000 # 1 час
   streamers: []
+
+  #База данных
+  database:
+    host: "127.0.0.1"
+    port: 5432
+    name: "name"
+    user: "postgres"
+    password: "password"
+    ssl: false
+    pool_size: 10

@@ -93,7 +93,35 @@ public class TwitchCommand implements CommandExecutor, Listener {
                     yield true;
                 }
                 String name = args[1];
+                StreamerInfo toRemove = streamerManager.getStreamers().stream()
+                        .filter(s -> s.mcName.equalsIgnoreCase(name) || s.twitchName.equalsIgnoreCase(name))
+                        .findFirst().orElse(null);
                 streamerManager.removeStreamer(name);
+
+                String targetMcName = toRemove != null ? toRemove.mcName : name;
+                LuckPerms luckPerms = plugin.getLuckPerms();
+                if (luckPerms != null) {
+                    Player online = org.bukkit.Bukkit.getPlayerExact(targetMcName);
+                    if (online != null) {
+                        UUID uuid = online.getUniqueId();
+                        luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user -> {
+                            user.data().clear(node -> node instanceof InheritanceNode &&
+                                    ((InheritanceNode) node).getGroupName().equalsIgnoreCase(plugin.getTwitchGroup()));
+                            luckPerms.getUserManager().saveUser(user);
+                        });
+                    } else {
+                        luckPerms.getUserManager().lookupUniqueId(targetMcName).thenAcceptAsync(uuid -> {
+                            if (uuid == null) {
+                                return;
+                            }
+                            luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user -> {
+                                user.data().clear(node -> node instanceof InheritanceNode &&
+                                        ((InheritanceNode) node).getGroupName().equalsIgnoreCase(plugin.getTwitchGroup()));
+                                luckPerms.getUserManager().saveUser(user);
+                            });
+                        });
+                    }
+                }
                 sender.sendMessage(plugin.getMessage("streamer_removed", name, "", ""));
                 yield true;
             }
@@ -136,7 +164,10 @@ public class TwitchCommand implements CommandExecutor, Listener {
                 List<StreamerInfo> liveStreamers = new ArrayList<>();
                 synchronized (streamerManager.getStreamers()) {
                     for (StreamerInfo s : streamerManager.getStreamers()) {
-                        if (liveStatus.getOrDefault(s.twitchName.toLowerCase(), false)) {
+                        String mcName = s.mcName == null ? "" : s.mcName.trim();
+                        boolean isOnline = org.bukkit.Bukkit.getOnlinePlayers().stream()
+                                .anyMatch(p -> p.getName().equalsIgnoreCase(mcName));
+                        if (isOnline && liveStatus.getOrDefault(s.twitchName.toLowerCase(), false)) {
                             liveStreamers.add(s);
                         }
                     }
@@ -277,23 +308,32 @@ public class TwitchCommand implements CommandExecutor, Listener {
         StreamerInfo streamer = streamerManager.getStreamers().stream()
             .filter(s -> s.mcName.equalsIgnoreCase(mcName))
             .findFirst().orElse(null);
-        if (streamer != null) {
-            Boolean isLive = streamerManager.getStreamerLiveStatus().get(streamer.twitchName.toLowerCase());
-            LuckPerms luckPerms = plugin.getLuckPerms();
-            if (luckPerms != null) {
-                UUID uuid = player.getUniqueId();
-                luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user -> {
-                    if (Boolean.TRUE.equals(isLive)) {
-                        plugin.getLogger().info("[DEBUG] Выдаём группу " + plugin.getTwitchGroup() + " игроку UUID=" + uuid);
-                        user.data().add(InheritanceNode.builder(plugin.getTwitchGroup()).build());
-                    } else {
-                        plugin.getLogger().info("[DEBUG] Снимаем группу " + plugin.getTwitchGroup() + " с игрока UUID=" + uuid);
-                        user.data().clear(node -> node instanceof InheritanceNode &&
-                                ((InheritanceNode) node).getGroupName().equalsIgnoreCase(plugin.getTwitchGroup()));
-                    }
-                    luckPerms.getUserManager().saveUser(user);
-                });
-            }
+        LuckPerms luckPerms = plugin.getLuckPerms();
+        if (luckPerms == null) {
+            return;
         }
+
+        UUID uuid = player.getUniqueId();
+        if (streamer == null) {
+            luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user -> {
+                user.data().clear(node -> node instanceof InheritanceNode &&
+                        ((InheritanceNode) node).getGroupName().equalsIgnoreCase(plugin.getTwitchGroup()));
+                luckPerms.getUserManager().saveUser(user);
+            });
+            return;
+        }
+
+        Boolean isLive = streamerManager.getStreamerLiveStatus().get(streamer.twitchName.toLowerCase());
+        luckPerms.getUserManager().loadUser(uuid).thenAcceptAsync(user -> {
+            if (Boolean.TRUE.equals(isLive)) {
+                plugin.getLogger().info("[DEBUG] Выдаём группу " + plugin.getTwitchGroup() + " игроку UUID=" + uuid);
+                user.data().add(InheritanceNode.builder(plugin.getTwitchGroup()).build());
+            } else {
+                plugin.getLogger().info("[DEBUG] Снимаем группу " + plugin.getTwitchGroup() + " с игрока UUID=" + uuid);
+                user.data().clear(node -> node instanceof InheritanceNode &&
+                        ((InheritanceNode) node).getGroupName().equalsIgnoreCase(plugin.getTwitchGroup()));
+            }
+            luckPerms.getUserManager().saveUser(user);
+        });
     }
 }
