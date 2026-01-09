@@ -29,6 +29,7 @@ public class TwitchStreamPlugin extends JavaPlugin {
     private TwitchApiService twitchApiService;
     private StreamerManager streamerManager;
     private io.papermc.paper.threadedregions.scheduler.ScheduledTask announceTask = null;
+    private io.papermc.paper.threadedregions.scheduler.ScheduledTask streamCheckerTask = null;
 
     public String getTwitchGroup() {
         return twitchGroup;
@@ -105,7 +106,10 @@ public class TwitchStreamPlugin extends JavaPlugin {
 
     private void startStreamChecker() {
         long checkPeriod = config.getLong("twitch.stream_check_period", 1200L);
-        getServer().getGlobalRegionScheduler().runAtFixedRate(
+        if (streamCheckerTask != null) {
+            streamCheckerTask.cancel();
+        }
+        streamCheckerTask = getServer().getGlobalRegionScheduler().runAtFixedRate(
             this,
             task -> {
                 for (StreamerInfo streamer : streamerManager.getStreamers()) {
@@ -365,6 +369,9 @@ public class TwitchStreamPlugin extends JavaPlugin {
         }
         if (announceTask != null) {
             announceTask.cancel();
+        }
+        if (streamCheckerTask != null) {
+            streamCheckerTask.cancel();
         }
         getLogger().info("[TWITCH] Плагин успешно выгружен.");
     }
