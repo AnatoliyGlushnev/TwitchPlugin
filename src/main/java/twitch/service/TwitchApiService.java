@@ -4,6 +4,8 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 /* Twitch API */
@@ -14,6 +16,9 @@ public class TwitchApiService {
 
     private static final long RATE_LIMIT_LOG_THROTTLE_MS = 60_000L;
     private static volatile long lastRateLimitLogTimeMs = 0L;
+
+    private static final long REQUEST_LOG_THROTTLE_MS = 60_000L;
+    private static final Map<String, Long> lastRequestLogTimeMs = new ConcurrentHashMap<>();
 
     private static final long RATE_LIMIT_SAFETY_BUFFER_MS = 2_000L;
     private static volatile long rateLimitRetryAfterMs = 0L;
@@ -83,10 +88,28 @@ public class TwitchApiService {
             if (remainingMs < 0L) {
                 remainingMs = 0L;
             }
+
+            Long last = lastRequestLogTimeMs.get(endpoint);
+            if (last == null || nowBeforeRequest - last > REQUEST_LOG_THROTTLE_MS) {
+                lastRequestLogTimeMs.put(endpoint, nowBeforeRequest);
+                logger.info("[TWITCH API] Запрос пропущен из-за rate_limit backoff: endpoint=" + endpoint +
+                        " retry_in_ms=" + remainingMs +
+                        " last_remaining=" + (lastRateLimitRemaining == null ? "" : lastRateLimitRemaining) +
+                        " last_limit=" + (lastRateLimitLimit == null ? "" : lastRateLimitLimit) +
+                        (lastRateLimitReset != null && !lastRateLimitReset.isEmpty() ? (" last_reset=" + lastRateLimitReset) : ""));
+            }
+
             return buildRateLimitJson("", "0", String.valueOf(retryAfter / 1000L));
         }
         try {
             URL url = new URL(endpoint);
+
+            Long last = lastRequestLogTimeMs.get(endpoint);
+            if (last == null || nowBeforeRequest - last > REQUEST_LOG_THROTTLE_MS) {
+                lastRequestLogTimeMs.put(endpoint, nowBeforeRequest);
+                logger.info("[TWITCH API] Реальный HTTP запрос: endpoint=" + endpoint);
+            }
+
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Client-Id", clientId);
