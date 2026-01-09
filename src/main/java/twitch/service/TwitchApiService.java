@@ -8,6 +8,8 @@ import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.net.URL;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 import java.util.logging.Level;
 import javax.net.ssl.SSLException;
@@ -17,6 +19,19 @@ public class TwitchApiService {
     private final String clientId;
     private final String oauthToken;
     private final Logger logger;
+
+    private static final long RATE_LIMIT_LOG_THROTTLE_MS = 60_000L;
+    private static volatile long lastRateLimitLogTimeMs = 0L;
+
+    private static final long REQUEST_LOG_THROTTLE_MS = 60_000L;
+    private static final Map<String, Long> lastRequestLogTimeMs = new ConcurrentHashMap<>();
+
+    private static final long RATE_LIMIT_SAFETY_BUFFER_MS = 2_000L;
+    private static volatile long rateLimitRetryAfterMs = 0L;
+
+    private static volatile String lastRateLimitLimit = "";
+    private static volatile String lastRateLimitRemaining = "";
+    private static volatile String lastRateLimitReset = "";
 
     public TwitchApiService(String clientId, String oauthToken, Logger logger) {
         this.clientId = clientId;
@@ -127,18 +142,113 @@ public class TwitchApiService {
         logger.log(level, logLine, e);
     }
 
+    private static long parseResetEpochSecondsToMs(String resetHeader) {
+        if (resetHeader == null || resetHeader.isEmpty()) {
+            return 0L;
+        }
+        try {
+            long seconds = Long.parseLong(resetHeader.trim());
+            if (seconds <= 0L) {
+                return 0L;
+            }
+            return seconds * 1000L;
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
+    }
+
+    private static String buildRateLimitJson(String limit, String remaining, String reset) {
+        return "{\"error\": \"rate_limit\", \"code\": 429," +
+                " \"ratelimit_limit\": \"" + (limit == null ? "" : limit) + "\"," +
+                " \"ratelimit_remaining\": \"" + (remaining == null ? "" : remaining) + "\"," +
+                " \"ratelimit_reset\": \"" + (reset == null ? "" : reset) + "\"," +
+                " \"message\": \"Превышен лимит запросов к Twitch API. Попробуйте позже.\"}";
+    }
+
+    private static void rememberRateLimitHeaders(String limit, String remaining, String reset) {
+        if (limit != null) {
+            lastRateLimitLimit = limit;
+        }
+        if (remaining != null) {
+            lastRateLimitRemaining = remaining;
+        }
+        if (reset != null) {
+            lastRateLimitReset = reset;
+        }
+    }
+
+    public String getLastRateLimitLimit() {
+        return lastRateLimitLimit;
+    }
+
+    public String getLastRateLimitRemaining() {
+        return lastRateLimitRemaining;
+    }
+
+    public String getLastRateLimitReset() {
+        return lastRateLimitReset;
+    }
+
     public String sendGetRequest(String endpoint) throws Exception {
+        long nowBeforeRequest = System.currentTimeMillis();
+        long retryAfter = rateLimitRetryAfterMs;
+        if (retryAfter > 0L && nowBeforeRequest < retryAfter) {
+            long remainingMs = retryAfter - nowBeforeRequest;
+            if (remainingMs < 0L) {
+                remainingMs = 0L;
+            }
+
+            Long last = lastRequestLogTimeMs.get(endpoint);
+            if (last == null || nowBeforeRequest - last > REQUEST_LOG_THROTTLE_MS) {
+                lastRequestLogTimeMs.put(endpoint, nowBeforeRequest);
+                logger.info("[TWITCH API] Запрос пропущен из-за rate_limit backoff: endpoint=" + endpoint +
+                        " retry_in_ms=" + remainingMs +
+                        " last_remaining=" + (lastRateLimitRemaining == null ? "" : lastRateLimitRemaining) +
+                        " last_limit=" + (lastRateLimitLimit == null ? "" : lastRateLimitLimit) +
+                        (lastRateLimitReset != null && !lastRateLimitReset.isEmpty() ? (" last_reset=" + lastRateLimitReset) : ""));
+            }
+
+            return buildRateLimitJson("", "0", String.valueOf(retryAfter / 1000L));
+        }
+
         try {
             URL url = new URL(endpoint);
+
+            Long last = lastRequestLogTimeMs.get(endpoint);
+            if (last == null || nowBeforeRequest - last > REQUEST_LOG_THROTTLE_MS) {
+                lastRequestLogTimeMs.put(endpoint, nowBeforeRequest);
+                logger.info("[TWITCH API] Реальный HTTP запрос: endpoint=" + endpoint);
+            }
+
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("Client-Id", clientId);
             conn.setRequestProperty("Authorization", "Bearer " + oauthToken);
 
             int responseCode = conn.getResponseCode();
+
+            String limitHdr = conn.getHeaderField("Ratelimit-Limit");
+            String remainingHdr = conn.getHeaderField("Ratelimit-Remaining");
+            String resetHdr = conn.getHeaderField("Ratelimit-Reset");
+            rememberRateLimitHeaders(limitHdr, remainingHdr, resetHdr);
+
             if (responseCode == 429) {
-                logger.warning("[TWITCH API] Превышен лимит запросов к Twitch API (429 Too Many Requests). Попробуйте позже.");
-                return "{\"error\": \"rate_limit\", \"message\": \"Превышен лимит запросов к Twitch API. Попробуйте позже.\"}";
+                long resetAtMs = parseResetEpochSecondsToMs(resetHdr);
+                if (resetAtMs > 0L) {
+                    rateLimitRetryAfterMs = resetAtMs + RATE_LIMIT_SAFETY_BUFFER_MS;
+                } else {
+                    rateLimitRetryAfterMs = System.currentTimeMillis() + 30_000L;
+                }
+
+                long now = System.currentTimeMillis();
+                if (now - lastRateLimitLogTimeMs > RATE_LIMIT_LOG_THROTTLE_MS) {
+                    lastRateLimitLogTimeMs = now;
+                    String details = "limit=" + (limitHdr == null ? "?" : limitHdr) +
+                            " remaining=" + (remainingHdr == null ? "?" : remainingHdr) +
+                            " reset=" + (resetHdr == null ? "?" : resetHdr);
+                    logger.warning("[TWITCH API] Превышен лимит запросов к Twitch API (429 Too Many Requests). " + details);
+                }
+                return buildRateLimitJson(limitHdr, remainingHdr, resetHdr);
             } else if (responseCode == 401 || responseCode == 403) {
                 // Ошибка при авторизации API
                 try (BufferedReader err = new BufferedReader(new InputStreamReader(conn.getErrorStream()))) {
