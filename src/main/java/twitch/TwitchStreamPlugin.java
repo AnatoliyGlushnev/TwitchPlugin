@@ -18,6 +18,7 @@ import twitch.command.TwitchCommand;
 public class TwitchStreamPlugin extends JavaPlugin {
 
     private static java.util.Map<String, Long> lastErrorLogTime = new java.util.HashMap<>();
+    private final java.util.Set<String> streamCheckInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private java.util.concurrent.ExecutorService executorService; //асинхронная задач
     private FileConfiguration config;
     private TwitchCommand twitchCommand;
@@ -112,6 +113,14 @@ public class TwitchStreamPlugin extends JavaPlugin {
                         checkTwitchStream(streamer);
                     } else {
                         streamerManager.getStreamerLiveStatus().put(streamer.twitchName.toLowerCase(), false);
+                    }
+                }
+                if (twitchApiService != null) {
+                    String limit = twitchApiService.getLastRateLimitLimit();
+                    String remaining = twitchApiService.getLastRateLimitRemaining();
+                    String reset = twitchApiService.getLastRateLimitReset();
+                    if (limit != null && !limit.isEmpty() && remaining != null && !remaining.isEmpty()) {
+                        getLogger().info("[TWITCH] Период проверки API: осталось " + remaining + " из " + limit + " запросов" + (reset != null && !reset.isEmpty() ? (" (reset=" + reset + ")") : ""));
                     }
                 }
             },
@@ -224,6 +233,10 @@ public class TwitchStreamPlugin extends JavaPlugin {
     }
 
     private void checkTwitchStream(StreamerInfo streamer) {
+        String streamerKey = streamer.twitchName == null ? "" : streamer.twitchName.toLowerCase();
+        if (!streamCheckInFlight.add(streamerKey)) {
+            return;
+        }
         executorService.submit(() -> {
             String endpoint = "https://api.twitch.tv/helix/streams?user_login=" + streamer.twitchName;
             try {
@@ -319,6 +332,8 @@ public class TwitchStreamPlugin extends JavaPlugin {
                     e.printStackTrace(new java.io.PrintWriter(sw));
                     getLogger().warning("Ошибка при проверке Twitch для " + streamer.twitchName + ": " + sw.toString());
                 }
+            } finally {
+                streamCheckInFlight.remove(streamerKey);
             }
         });
     }
