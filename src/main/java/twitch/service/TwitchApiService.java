@@ -12,6 +12,9 @@ public class TwitchApiService {
     private final String oauthToken;
     private final Logger logger;
 
+    private static final long RATE_LIMIT_LOG_THROTTLE_MS = 60_000L;
+    private static volatile long lastRateLimitLogTimeMs = 0L;
+
     public TwitchApiService(String clientId, String oauthToken, Logger logger) {
         this.clientId = clientId;
         this.oauthToken = oauthToken;
@@ -28,8 +31,24 @@ public class TwitchApiService {
 
             int responseCode = conn.getResponseCode();
             if (responseCode == 429) {
-                logger.warning("[TWITCH API] Превышен лимит запросов к Twitch API (429 Too Many Requests). Попробуйте позже.");
-                return "{\"error\": \"rate_limit\", \"message\": \"Превышен лимит запросов к Twitch API. Попробуйте позже.\"}";
+                String limit = conn.getHeaderField("Ratelimit-Limit");
+                String remaining = conn.getHeaderField("Ratelimit-Remaining");
+                String reset = conn.getHeaderField("Ratelimit-Reset");
+
+                long now = System.currentTimeMillis();
+                if (now - lastRateLimitLogTimeMs > RATE_LIMIT_LOG_THROTTLE_MS) {
+                    lastRateLimitLogTimeMs = now;
+                    String details = "limit=" + (limit == null ? "?" : limit) +
+                            " remaining=" + (remaining == null ? "?" : remaining) +
+                            " reset=" + (reset == null ? "?" : reset);
+                    logger.warning("[TWITCH API] Превышен лимит запросов к Twitch API (429 Too Many Requests). " + details);
+                }
+
+                return "{\"error\": \"rate_limit\", \"code\": 429," +
+                        " \"ratelimit_limit\": \"" + (limit == null ? "" : limit) + "\"," +
+                        " \"ratelimit_remaining\": \"" + (remaining == null ? "" : remaining) + "\"," +
+                        " \"ratelimit_reset\": \"" + (reset == null ? "" : reset) + "\"," +
+                        " \"message\": \"Превышен лимит запросов к Twitch API. Попробуйте позже.\"}";
             } else if (responseCode == 401 || responseCode == 403) {
                 // Ошибка при авторизации API
                 try (BufferedReader err = new BufferedReader(new InputStreamReader(conn.getErrorStream()))) {

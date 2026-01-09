@@ -228,6 +228,20 @@ public class TwitchStreamPlugin extends JavaPlugin {
             String endpoint = "https://api.twitch.tv/helix/streams?user_login=" + streamer.twitchName;
             try {
                 String response = twitchApiService.sendGetRequest(endpoint);
+                if (response != null && response.contains("\"error\": \"rate_limit\"")) {
+                    String errorKey = streamer.twitchName.toLowerCase() + ":rate_limit";
+                    long now = System.currentTimeMillis();
+                    synchronized (TwitchStreamPlugin.class) {
+                        if (lastErrorLogTime == null) lastErrorLogTime = new java.util.HashMap<>();
+                        Long last = lastErrorLogTime.get(errorKey);
+                        if (last == null || now - last > 60_000) {
+                            getLogger().warning("[TWITCH API] Превышен лимит запросов к Twitch API (429). Пропускаем обновление статуса для " + streamer.twitchName);
+                            lastErrorLogTime.put(errorKey, now);
+                        }
+                    }
+                    return;
+                }
+
                 boolean isLive = response.contains("\"type\":\"live\"");
                 boolean wasLive = streamerManager.getStreamerLiveStatus().getOrDefault(streamer.twitchName.toLowerCase(), false);
 
