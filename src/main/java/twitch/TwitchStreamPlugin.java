@@ -120,10 +120,114 @@ public class TwitchStreamPlugin extends JavaPlugin {
         );
     }
 
+    private static boolean isApiTwitchTvHost(String host) {
+        if (host == null) {
+            return false;
+        }
+        return "api.twitch.tv".equalsIgnoreCase(host);
+    }
+
+    private static String safeLower(String s) {
+        return s == null ? "" : s.toLowerCase();
+    }
+
+    private static String buildCauseChain(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        Throwable cur = t;
+        int depth = 0;
+        while (cur != null && depth < 12) {
+            if (depth > 0) {
+                sb.append(" <- ");
+            }
+            String msg = cur.getMessage();
+            sb.append(cur.getClass().getName());
+            if (msg != null && !msg.isEmpty()) {
+                sb.append(": ").append(msg);
+            }
+            cur = cur.getCause();
+            depth++;
+        }
+        return sb.toString();
+    }
+
+    private static String classifyNetworkProblem(Throwable t) {
+        Throwable cur = t;
+        while (cur != null) {
+            String msg = safeLower(cur.getMessage());
+
+            if (cur instanceof java.net.UnknownHostException) {
+                return "dns_unknown_host";
+            }
+            if (cur instanceof java.net.SocketTimeoutException || msg.contains("timed out")) {
+                return "timeout";
+            }
+            if (cur instanceof java.net.ConnectException || msg.contains("connection refused")) {
+                return "connect_refused";
+            }
+            if (cur instanceof javax.net.ssl.SSLException) {
+                return "ssl_error";
+            }
+            if (cur instanceof java.net.SocketException) {
+                if (msg.contains("connection reset")) {
+                    return "socket_connection_reset";
+                }
+                if (msg.contains("broken pipe")) {
+                    return "socket_broken_pipe";
+                }
+                return "socket_error";
+            }
+            if (msg.contains("no route to host")) {
+                return "no_route_to_host";
+            }
+            if (msg.contains("network is unreachable")) {
+                return "network_unreachable";
+            }
+
+            cur = cur.getCause();
+        }
+        return "unknown";
+    }
+
+    private void logApiTwitchTvConnectionProblem(String endpoint, Throwable e) {
+        String host = null;
+        try {
+            host = new java.net.URL(endpoint).getHost();
+        } catch (Exception ignored) {
+        }
+
+        Throwable root = e;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+
+        String type = classifyNetworkProblem(e);
+        String chain = buildCauseChain(e);
+        String rootMsg = root.getMessage() != null ? root.getMessage() : root.toString();
+
+        java.util.logging.Level level;
+        if (!isApiTwitchTvHost(host)) {
+            level = java.util.logging.Level.WARNING;
+        } else if ("dns_unknown_host".equals(type) || "timeout".equals(type) || "connect_refused".equals(type)) {
+            level = java.util.logging.Level.INFO;
+        } else {
+            level = java.util.logging.Level.WARNING;
+        }
+
+        getLogger().log(level,
+                "[TWITCH API] Ошибка соединения" +
+                        " host=" + (host == null ? "?" : host) +
+                        " endpoint=" + endpoint +
+                        " type=" + type +
+                        " root=\"" + rootMsg.replace("\"", "'") + "\"" +
+                        " causes=" + chain,
+                e);
+    }
+
     private void checkTwitchStream(StreamerInfo streamer) {
         executorService.submit(() -> {
+            String endpoint = "https://api.twitch.tv/helix/streams?user_login=" + streamer.twitchName;
             try {
-                String response = twitchApiService.sendGetRequest("https://api.twitch.tv/helix/streams?user_login=" + streamer.twitchName);
+                String response = twitchApiService.sendGetRequest(endpoint);
                 boolean isLive = response.contains("\"type\":\"live\"");
                 boolean wasLive = streamerManager.getStreamerLiveStatus().getOrDefault(streamer.twitchName.toLowerCase(), false);
 
@@ -177,17 +281,21 @@ public class TwitchStreamPlugin extends JavaPlugin {
                     });
                 }
             } catch (Exception e) {
-                Throwable cause = e.getCause() != null ? e.getCause() : e;
-                String msg = cause.getMessage() != null ? cause.getMessage() : cause.toString();
-                if (isTemporaryNetworkError(cause, msg)) {
-                
-                    String errorKey = streamer.twitchName.toLowerCase() + ":" + cause.getClass().getSimpleName();
+                String type = classifyNetworkProblem(e);
+                Throwable root = e;
+                while (root.getCause() != null) {
+                    root = root.getCause();
+                }
+                String msg = root.getMessage() != null ? root.getMessage() : root.toString();
+
+                if (isTemporaryNetworkError(type, endpoint)) {
+                    String errorKey = streamer.twitchName.toLowerCase() + ":" + type;
                     long now = System.currentTimeMillis();
                     synchronized (TwitchStreamPlugin.class) {
                         if (lastErrorLogTime == null) lastErrorLogTime = new java.util.HashMap<>();
                         Long last = lastErrorLogTime.get(errorKey);
                         if (last == null || now - last > 60_000) {
-                            getLogger().info("[TwitchStream] Не удалось проверить Twitch для " + streamer.twitchName + ": " + msg);
+                            logApiTwitchTvConnectionProblem(endpoint, e);
                             lastErrorLogTime.put(errorKey, now);
                         }
                     }
@@ -201,13 +309,20 @@ public class TwitchStreamPlugin extends JavaPlugin {
         });
     }
 
-    private boolean isTemporaryNetworkError(Throwable cause, String msg) {
-        return cause instanceof java.net.ConnectException ||
-                cause instanceof java.net.UnknownHostException ||
-                cause instanceof java.net.SocketTimeoutException ||
-                cause instanceof javax.net.ssl.SSLException ||
-                msg.toLowerCase().contains("timed out") ||
-                msg.toLowerCase().contains("connection refused");
+    private boolean isTemporaryNetworkError(String type, String endpoint) {
+        String host = null;
+        try {
+            host = new java.net.URL(endpoint).getHost();
+        } catch (Exception ignored) {
+        }
+        if (!isApiTwitchTvHost(host)) {
+            return false;
+        }
+        return "dns_unknown_host".equals(type) ||
+                "timeout".equals(type) ||
+                "connect_refused".equals(type) ||
+                "no_route_to_host".equals(type) ||
+                "network_unreachable".equals(type);
     }
 
     public String getMessage(String key, String player, String link) {
