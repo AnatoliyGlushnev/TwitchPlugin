@@ -19,6 +19,7 @@ public class TwitchApiService {
     private final String clientId;
     private final String oauthToken;
     private final Logger logger;
+    private final String proxyBaseUrl;
 
     private static final long RATE_LIMIT_LOG_THROTTLE_MS = 60_000L;
     private static volatile long lastRateLimitLogTimeMs = 0L;
@@ -34,9 +35,35 @@ public class TwitchApiService {
     private static volatile String lastRateLimitReset = "";
 
     public TwitchApiService(String clientId, String oauthToken, Logger logger) {
+        this(clientId, oauthToken, logger, null);
+    }
+
+    public TwitchApiService(String clientId, String oauthToken, Logger logger, String proxyBaseUrl) {
         this.clientId = clientId;
         this.oauthToken = oauthToken;
         this.logger = logger;
+        this.proxyBaseUrl = normalizeProxyBaseUrl(proxyBaseUrl);
+    }
+
+    private static String normalizeProxyBaseUrl(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.trim();
+        if (s.isEmpty()) {
+            return null;
+        }
+        while (s.endsWith("/")) {
+            s = s.substring(0, s.length() - 1);
+        }
+        return s;
+    }
+
+    private String maybeProxyEndpoint(String endpoint) {
+        if (proxyBaseUrl == null) {
+            return endpoint;
+        }
+        return endpoint.replace("https://api.twitch.tv/helix", proxyBaseUrl);
     }
 
     private static boolean isApiTwitchTvHost(String host) {
@@ -212,7 +239,8 @@ public class TwitchApiService {
         }
 
         try {
-            URL url = new URL(endpoint);
+            String targetEndpoint = maybeProxyEndpoint(endpoint);
+            URL url = new URL(targetEndpoint);
 
             Long last = lastRequestLogTimeMs.get(endpoint);
             if (last == null || nowBeforeRequest - last > REQUEST_LOG_THROTTLE_MS) {
@@ -222,8 +250,10 @@ public class TwitchApiService {
 
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("Client-Id", clientId);
-            conn.setRequestProperty("Authorization", "Bearer " + oauthToken);
+            if (proxyBaseUrl == null) {
+                conn.setRequestProperty("Client-Id", clientId);
+                conn.setRequestProperty("Authorization", "Bearer " + oauthToken);
+            }
 
             int responseCode = conn.getResponseCode();
 

@@ -29,15 +29,18 @@ public class TwitchAnnounceTask implements Runnable {
                 .collect(Collectors.toList());
         if (!liveStreamers.isEmpty()) {
             for (StreamerInfo s : liveStreamers) {
-                if (Bukkit.getPlayerExact(s.mcName) != null) {
-                    String msg = plugin.getConfig().getString("messages.stream_repeat_broadcast", "{player} стрим: {link}")
-                            .replace("{player}", s.mcName)
-                            .replace("{link}", s.url);
-                    for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
-                        pluginScheduler.runForPlayer(plugin, p, () -> {
-                            p.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
-                        });
+                if (plugin instanceof twitch.TwitchStreamPlugin tp) {
+                    if (!tp.isStreamerPresentInNetwork(s.mcName)) {
+                        continue;
                     }
+                }
+                String msg = plugin.getConfig().getString("messages.stream_repeat_broadcast", "{player} стрим: {link}")
+                        .replace("{player}", s.mcName)
+                        .replace("{link}", s.url);
+                for (org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                    pluginScheduler.runForPlayer(plugin, p, () -> {
+                        p.sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', msg));
+                    });
                 }
             }
         }
